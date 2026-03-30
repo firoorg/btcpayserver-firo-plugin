@@ -375,26 +375,32 @@ namespace BTCPayServer.Plugins.Firo.Services
                 return true;
             }
 
-            // A transaction in a ChainLocked block is finalized and immutable,
-            // regardless of confirmation count.
-            if (details.ChainLocked)
+            // A ChainLocked block is finalized and immutable. Only 1 confirmation
+            // is needed (proving inclusion in the chainlocked block).
+            if (details.ChainLocked && details.ConfirmationCount >= 1)
             {
                 return true;
             }
 
-            // Fall back to confirmation-based settlement
+            // No lock — fall back to full confirmation-based settlement
             return ConfirmationsRequired(details, speedPolicy) <= details.ConfirmationCount;
         }
 
         public static long ConfirmationsRequired(FiroLikePaymentData details, SpeedPolicy speedPolicy)
         {
-            // InstantSend locked (pre-block) or ChainLocked (post-block) transactions
-            // don't need confirmation-based settlement.
-            if (details.InstantLocked || details.ChainLocked)
+            // InstantSend locked at 0 confs — no confirmations needed
+            if (details.InstantLocked && details.ConfirmationCount == 0)
             {
                 return 0;
             }
 
+            // ChainLocked block — only 1 confirmation needed
+            if (details.ChainLocked)
+            {
+                return 1;
+            }
+
+            // No lock — use store speed policy or custom threshold
             return (details, speedPolicy) switch
             {
                 ({ InvoiceSettledConfirmationThreshold: long v }, _) => v,

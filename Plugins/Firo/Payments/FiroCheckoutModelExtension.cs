@@ -54,11 +54,13 @@ namespace BTCPayServer.Plugins.Firo.Payments
                     .ThenBy(d => d.ConfirmationCount)
                     .First();
 
+                var requiredConfsForDisplay = FiroListener.ConfirmationsRequired(
+                    leastSettled, context.InvoiceEntity.SpeedPolicy);
                 if (FiroListener.IsSettled(leastSettled, context.InvoiceEntity.SpeedPolicy))
                 {
-                    // All payments settled (via lock or confirmations) - show as complete
-                    context.Model.ReceivedConfirmations = 0;
-                    context.Model.RequiredConfirmations = 0;
+                    // Settled — show received matching required so the progress bar is full
+                    context.Model.ReceivedConfirmations = requiredConfsForDisplay;
+                    context.Model.RequiredConfirmations = (int)requiredConfsForDisplay;
                 }
                 else
                 {
