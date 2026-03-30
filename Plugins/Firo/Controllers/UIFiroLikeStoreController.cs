@@ -154,10 +154,12 @@ namespace BTCPayServer.Plugins.Firo.Controllers
                         }
                 });
 
-            blob.SetExcluded(PaymentTypes.CHAIN.GetPaymentMethodId(viewModel.CryptoCode),
+            blob.SetExcluded(PaymentTypes.CHAIN.GetPaymentMethodId(cryptoCode),
                 !viewModel.Enabled);
             storeData.SetStoreBlob(blob);
             await _storeRepository.UpdateStore(storeData);
+            TempData[WellKnownTempData.SuccessMessage] =
+                StringLocalizer["Firo payment settings updated successfully"].Value;
             return RedirectToAction("GetStoreFiroLikePaymentMethod", new { cryptoCode });
         }
 

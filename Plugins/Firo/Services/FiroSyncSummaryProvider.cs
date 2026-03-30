@@ -28,7 +28,7 @@ namespace BTCPayServer.Plugins.Firo.Services
             return _firoRpcProvider.Summaries.Select(pair => new FiroSyncStatus()
             {
                 Summary = pair.Value,
-                PaymentMethodId = PaymentMethodId.Parse(pair.Key).ToString()
+                PaymentMethodId = PaymentTypes.CHAIN.GetPaymentMethodId(pair.Key).ToString()
             });
         }
     }

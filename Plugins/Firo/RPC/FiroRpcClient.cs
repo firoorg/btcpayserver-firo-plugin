@@ -53,7 +53,7 @@ namespace BTCPayServer.Plugins.Firo.RPC
             if (!string.IsNullOrEmpty(_username))
             {
                 httpRequest.Headers.Authorization = new AuthenticationHeaderValue("Basic",
-                    Convert.ToBase64String(Encoding.Default.GetBytes($"{_username}:{_password}")));
+                    Convert.ToBase64String(Encoding.UTF8.GetBytes($"{_username}:{_password}")));
             }
 
             var rawResult = await _httpClient.SendAsync(httpRequest, cts);

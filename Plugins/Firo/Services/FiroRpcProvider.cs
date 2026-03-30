@@ -41,7 +41,7 @@ namespace BTCPayServer.Plugins.Firo.Services
         public bool IsAvailable(string cryptoCode)
         {
             cryptoCode = cryptoCode.ToUpperInvariant();
-            return Summaries.ContainsKey(cryptoCode) && IsAvailable(Summaries[cryptoCode]);
+            return Summaries.TryGetValue(cryptoCode, out var summary) && IsAvailable(summary);
         }
 
         private bool IsAvailable(FiroLikeSummary summary)
