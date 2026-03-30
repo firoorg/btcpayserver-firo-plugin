@@ -71,7 +71,18 @@ namespace BTCPayServer.Plugins.Firo.Services
                 if (_firoRpcProvider.IsAvailable(stateChange.CryptoCode))
                 {
                     _logger.LogInformation($"{stateChange.CryptoCode} just became available");
-                    _ = UpdateAnyPendingFiroPayment(stateChange.CryptoCode);
+                    _ = Task.Run(async () =>
+                    {
+                        try
+                        {
+                            await UpdateAnyPendingFiroPayment(stateChange.CryptoCode);
+                        }
+                        catch (Exception ex)
+                        {
+                            _logger.LogError(ex,
+                                $"Error updating pending payments after {stateChange.CryptoCode} became available");
+                        }
+                    });
                 }
                 else
                 {
