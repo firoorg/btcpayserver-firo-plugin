@@ -13,5 +13,7 @@ namespace BTCPayServer.Plugins.Firo.RPC.Models
         [JsonProperty("txid")] public string TxId { get; set; }
         [JsonProperty("time")] public long Time { get; set; }
         [JsonProperty("timereceived")] public long TimeReceived { get; set; }
+        [JsonProperty("instantlock")] public bool InstantLock { get; set; }
+        [JsonProperty("chainlock")] public bool ChainLock { get; set; }
     }
 }

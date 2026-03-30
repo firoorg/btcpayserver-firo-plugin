@@ -19,11 +19,33 @@
         m.PaymentMethodId = handler.PaymentMethodId;
         m.DepositAddress = payment.Destination;
         m.Amount = payment.Value.ToString(CultureInfo.InvariantCulture);
+        m.InstantLocked = paymentData.InstantLocked;
+        m.ChainLocked = paymentData.ChainLocked;
 
         var confReq = FiroListener.ConfirmationsRequired(paymentData, payment.InvoiceEntity.SpeedPolicy);
         var confCount = paymentData.ConfirmationCount;
-        confCount = Math.Min(confReq, confCount);
-        m.Confirmations = $"{confCount} / {confReq}";
+
+        if (paymentData.InstantLocked && paymentData.ChainLocked)
+        {
+            m.LockStatus = "InstantSend + ChainLock";
+            m.Confirmations = $"{confCount} (Locked)";
+        }
+        else if (paymentData.InstantLocked)
+        {
+            m.LockStatus = "InstantSend Locked";
+            m.Confirmations = $"{confCount} (IS Locked)";
+        }
+        else if (paymentData.ChainLocked)
+        {
+            m.LockStatus = "ChainLocked";
+            m.Confirmations = $"{confCount} (ChainLocked)";
+        }
+        else
+        {
+            m.LockStatus = "Unconfirmed";
+            confCount = Math.Min(confReq, confCount);
+            m.Confirmations = $"{confCount} / {confReq}";
+        }
 
         m.TransactionId = paymentData.TransactionId;
         m.ReceivedTime = payment.ReceivedTime;
@@ -45,6 +67,7 @@
                 <th class="w-175px">Destination</th>
                 <th class="text-nowrap">Payment Proof</th>
                 <th class="text-end">Confirmations</th>
+                <th class="text-end">Lock Status</th>
                 <th class="w-150px text-end">Paid</th>
             </tr>
             </thead>
@@ -56,6 +79,16 @@
                     <td><vc:truncate-center text="@payment.DepositAddress" classes="truncate-center-id" /></td>
                     <td><vc:truncate-center text="@payment.TransactionId" link="@payment.TransactionLink" classes="truncate-center-id" /></td>
                     <td class="text-end">@payment.Confirmations</td>
+                    <td class="text-end">
+                        @if (payment.InstantLocked || payment.ChainLocked)
+                        {
+                            <span class="text-success">@payment.LockStatus</span>
+                        }
+                        else
+                        {
+                            <span class="text-warning">@payment.LockStatus</span>
+                        }
+                    </td>
                     <td class="payment-value text-end text-nowrap">
                         <span data-sensitive class="text-success">@DisplayFormatter.Currency(payment.Amount, payment.Currency)</span>
                     </td>

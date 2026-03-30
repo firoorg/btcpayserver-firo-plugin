@@ -7,5 +7,7 @@ namespace BTCPayServer.Plugins.Firo.Payments
         public long ConfirmationCount { get; set; }
         public string TransactionId { get; set; }
         public long? InvoiceSettledConfirmationThreshold { get; set; }
+        public bool InstantLocked { get; set; }
+        public bool ChainLocked { get; set; }
     }
 }

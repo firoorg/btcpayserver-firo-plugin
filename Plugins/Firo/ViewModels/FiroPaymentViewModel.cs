@@ -14,5 +14,8 @@ namespace BTCPayServer.Plugins.Firo.ViewModels
         public DateTimeOffset ReceivedTime { get; set; }
         public string TransactionLink { get; set; }
         public string Currency { get; set; }
+        public bool InstantLocked { get; set; }
+        public bool ChainLocked { get; set; }
+        public string LockStatus { get; set; }
     }
 }

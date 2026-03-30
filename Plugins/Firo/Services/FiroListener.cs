@@ -223,14 +223,18 @@ namespace BTCPayServer.Plugins.Firo.Services
                 // Find the mint info for this txid (for block height)
                 var mintInfo = mints.FirstOrDefault(m => m.TxId == txId);
 
-                // Get confirmation count
+                // Get transaction details including confirmations and lock states
                 long confirmations = 0;
                 long blockHeight = mintInfo?.Height ?? 0;
+                bool instantLocked = false;
+                bool chainLocked = false;
                 try
                 {
                     var txInfo = await rpcClient.SendCommandAsync<GetTransactionResponse>(
                         "gettransaction", new object[] { txId });
                     confirmations = txInfo.Confirmations;
+                    instantLocked = txInfo.InstantLock;
+                    chainLocked = txInfo.ChainLock;
                     if (txInfo.BlockHeight > 0)
                     {
                         blockHeight = txInfo.BlockHeight;
@@ -272,6 +276,8 @@ namespace BTCPayServer.Plugins.Firo.Services
                         txId,
                         confirmations,
                         blockHeight,
+                        instantLocked,
+                        chainLocked,
                         invoiceData.Invoice,
                         invoiceData.Details,
                         paymentsToUpdate);
@@ -305,6 +311,7 @@ namespace BTCPayServer.Plugins.Firo.Services
 
         private async Task HandlePaymentData(string cryptoCode, decimal amount,
             string sparkAddress, string txId, long confirmations, long blockHeight,
+            bool instantLocked, bool chainLocked,
             InvoiceEntity invoice, FiroLikeOnChainPaymentMethodDetails promptDetails,
             List<(PaymentEntity Payment, InvoiceEntity invoice)> paymentsToUpdate)
         {
@@ -318,11 +325,13 @@ namespace BTCPayServer.Plugins.Firo.Services
                 TransactionId = txId,
                 ConfirmationCount = confirmations,
                 BlockHeight = blockHeight,
+                InstantLocked = instantLocked,
+                ChainLocked = chainLocked,
                 InvoiceSettledConfirmationThreshold =
                     promptDetails.InvoiceSettledConfirmationThreshold
             };
 
-            var status = GetStatus(details, invoice.SpeedPolicy)
+            var status = IsSettled(details, invoice.SpeedPolicy)
                 ? PaymentStatus.Settled
                 : PaymentStatus.Processing;
 
@@ -357,11 +366,36 @@ namespace BTCPayServer.Plugins.Firo.Services
             }
         }
 
-        private bool GetStatus(FiroLikePaymentData details, SpeedPolicy speedPolicy)
-            => ConfirmationsRequired(details, speedPolicy) <= details.ConfirmationCount;
+        public static bool IsSettled(FiroLikePaymentData details, SpeedPolicy speedPolicy)
+        {
+            // A transaction that is InstantSend locked is considered secure
+            // even with 0 confirmations, so treat it as settled
+            if (details.InstantLocked)
+            {
+                return true;
+            }
+
+            // A transaction in a ChainLocked block is finalized and immutable
+            if (details.ChainLocked)
+            {
+                return true;
+            }
+
+            // Fall back to confirmation-based settlement
+            return ConfirmationsRequired(details, speedPolicy) <= details.ConfirmationCount;
+        }
 
         public static long ConfirmationsRequired(FiroLikePaymentData details, SpeedPolicy speedPolicy)
-            => (details, speedPolicy) switch
+        {
+            // Even when using confirmation-based settlement, if the tx is
+            // InstantSend locked or ChainLocked, 0 confirmations are needed.
+            // This method is used for display purposes (required confirmations count).
+            if (details.InstantLocked || details.ChainLocked)
+            {
+                return 0;
+            }
+
+            return (details, speedPolicy) switch
             {
                 ({ InvoiceSettledConfirmationThreshold: long v }, _) => v,
                 (_, SpeedPolicy.HighSpeed) => 0,
@@ -370,6 +404,7 @@ namespace BTCPayServer.Plugins.Firo.Services
                 (_, SpeedPolicy.LowSpeed) => 6,
                 _ => 6,
             };
+        }
 
         private async Task UpdateAnyPendingFiroPayment(string cryptoCode)
         {

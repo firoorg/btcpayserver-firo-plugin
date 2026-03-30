@@ -40,16 +40,29 @@ namespace BTCPayServer.Plugins.Firo.Payments
             }
             context.Model.CheckoutBodyComponentName =
                 BitcoinCheckoutModelExtension.CheckoutBodyComponentName;
-            var details = context.InvoiceEntity.GetPayments(true)
+            var allDetails = context.InvoiceEntity.GetPayments(true)
                 .Select(p => p.GetDetails<FiroLikePaymentData>(handler))
                 .Where(p => p is not null)
-                .FirstOrDefault();
-            if (details is not null)
+                .ToList();
+            if (allDetails.Count > 0)
             {
-                context.Model.ReceivedConfirmations = details.ConfirmationCount;
-                context.Model.RequiredConfirmations =
-                    (int)FiroListener.ConfirmationsRequired(details,
-                        context.InvoiceEntity.SpeedPolicy);
+                // Show the least-confirmed payment's status (the bottleneck)
+                var leastConfirmed = allDetails
+                    .OrderBy(d => d.InstantLocked || d.ChainLocked ? long.MaxValue : d.ConfirmationCount)
+                    .First();
+                var requiredConfs = FiroListener.ConfirmationsRequired(
+                    leastConfirmed, context.InvoiceEntity.SpeedPolicy);
+
+                // If InstantSend locked or ChainLocked, show as fully confirmed
+                if (leastConfirmed.InstantLocked || leastConfirmed.ChainLocked)
+                {
+                    context.Model.ReceivedConfirmations = requiredConfs;
+                }
+                else
+                {
+                    context.Model.ReceivedConfirmations = leastConfirmed.ConfirmationCount;
+                }
+                context.Model.RequiredConfirmations = (int)requiredConfs;
             }
 
             context.Model.InvoiceBitcoinUrl =
