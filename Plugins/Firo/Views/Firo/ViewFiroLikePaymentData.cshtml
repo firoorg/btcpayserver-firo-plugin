@@ -22,29 +22,32 @@
         m.InstantLocked = paymentData.InstantLocked;
         m.ChainLocked = paymentData.ChainLocked;
 
+        // Lock status reflects the transaction lifecycle:
+        // 1. InstantSend Locked (0 confs, pre-block, secured by masternode quorum)
+        // 2. ChainLocked (in block, block signed by masternode quorum)
+        // 3. Confirmed (in block, not yet chainlocked)
+        // 4. Unconfirmed (0 confs, no InstantSend lock)
+        m.LockStatus = FiroListener.GetLockStatusDescription(paymentData);
+
         var confReq = FiroListener.ConfirmationsRequired(paymentData, payment.InvoiceEntity.SpeedPolicy);
         var confCount = paymentData.ConfirmationCount;
 
-        if (paymentData.InstantLocked && paymentData.ChainLocked)
+        if (paymentData.InstantLocked && confCount == 0)
         {
-            m.LockStatus = "InstantSend + ChainLock";
-            m.Confirmations = $"{confCount} (Locked)";
-        }
-        else if (paymentData.InstantLocked)
-        {
-            m.LockStatus = "InstantSend Locked";
-            m.Confirmations = $"{confCount} (IS Locked)";
+            m.Confirmations = "0 (IS Locked)";
         }
         else if (paymentData.ChainLocked)
         {
-            m.LockStatus = "ChainLocked";
             m.Confirmations = $"{confCount} (ChainLocked)";
+        }
+        else if (confCount > 0)
+        {
+            confCount = Math.Min(confReq, confCount);
+            m.Confirmations = confReq > 0 ? $"{confCount} / {confReq}" : $"{paymentData.ConfirmationCount}";
         }
         else
         {
-            m.LockStatus = "Unconfirmed";
-            confCount = Math.Min(confReq, confCount);
-            m.Confirmations = $"{confCount} / {confReq}";
+            m.Confirmations = confReq > 0 ? $"0 / {confReq}" : "0";
         }
 
         m.TransactionId = paymentData.TransactionId;
@@ -83,6 +86,10 @@
                         @if (payment.InstantLocked || payment.ChainLocked)
                         {
                             <span class="text-success">@payment.LockStatus</span>
+                        }
+                        else if (payment.LockStatus == "Confirmed")
+                        {
+                            <span class="text-info">@payment.LockStatus</span>
                         }
                         else
                         {

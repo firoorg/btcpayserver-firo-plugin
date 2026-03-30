@@ -368,14 +368,15 @@ namespace BTCPayServer.Plugins.Firo.Services
 
         public static bool IsSettled(FiroLikePaymentData details, SpeedPolicy speedPolicy)
         {
-            // A transaction that is InstantSend locked is considered secure
-            // even with 0 confirmations, so treat it as settled
-            if (details.InstantLocked)
+            // InstantSend lock secures the transaction before block inclusion
+            // (0 confirmations). This is considered safe to accept as settled.
+            if (details.InstantLocked && details.ConfirmationCount == 0)
             {
                 return true;
             }
 
-            // A transaction in a ChainLocked block is finalized and immutable
+            // A transaction in a ChainLocked block is finalized and immutable,
+            // regardless of confirmation count.
             if (details.ChainLocked)
             {
                 return true;
@@ -387,9 +388,8 @@ namespace BTCPayServer.Plugins.Firo.Services
 
         public static long ConfirmationsRequired(FiroLikePaymentData details, SpeedPolicy speedPolicy)
         {
-            // Even when using confirmation-based settlement, if the tx is
-            // InstantSend locked or ChainLocked, 0 confirmations are needed.
-            // This method is used for display purposes (required confirmations count).
+            // InstantSend locked (pre-block) or ChainLocked (post-block) transactions
+            // don't need confirmation-based settlement.
             if (details.InstantLocked || details.ChainLocked)
             {
                 return 0;
@@ -404,6 +404,29 @@ namespace BTCPayServer.Plugins.Firo.Services
                 (_, SpeedPolicy.LowSpeed) => 6,
                 _ => 6,
             };
+        }
+
+        /// <summary>
+        /// Returns a human-readable description of the transaction's lock/confirmation state.
+        /// </summary>
+        public static string GetLockStatusDescription(FiroLikePaymentData details)
+        {
+            if (details.ConfirmationCount == 0 && details.InstantLocked)
+            {
+                return "InstantSend Locked";
+            }
+
+            if (details.ChainLocked)
+            {
+                return "ChainLocked";
+            }
+
+            if (details.ConfirmationCount > 0)
+            {
+                return "Confirmed";
+            }
+
+            return "Unconfirmed";
         }
 
         private async Task UpdateAnyPendingFiroPayment(string cryptoCode)

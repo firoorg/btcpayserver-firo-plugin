@@ -46,23 +46,27 @@ namespace BTCPayServer.Plugins.Firo.Payments
                 .ToList();
             if (allDetails.Count > 0)
             {
-                // Show the least-confirmed payment's status (the bottleneck)
-                var leastConfirmed = allDetails
-                    .OrderBy(d => d.InstantLocked || d.ChainLocked ? long.MaxValue : d.ConfirmationCount)
+                // Find the payment that is the bottleneck for settlement.
+                // Locked payments (InstantSend at 0-conf, or ChainLocked) are
+                // already settled, so sort them last.
+                var leastSettled = allDetails
+                    .OrderBy(d => FiroListener.IsSettled(d, context.InvoiceEntity.SpeedPolicy) ? 1 : 0)
+                    .ThenBy(d => d.ConfirmationCount)
                     .First();
-                var requiredConfs = FiroListener.ConfirmationsRequired(
-                    leastConfirmed, context.InvoiceEntity.SpeedPolicy);
 
-                // If InstantSend locked or ChainLocked, show as fully confirmed
-                if (leastConfirmed.InstantLocked || leastConfirmed.ChainLocked)
+                if (FiroListener.IsSettled(leastSettled, context.InvoiceEntity.SpeedPolicy))
                 {
-                    context.Model.ReceivedConfirmations = requiredConfs;
+                    // All payments settled (via lock or confirmations) - show as complete
+                    context.Model.ReceivedConfirmations = 0;
+                    context.Model.RequiredConfirmations = 0;
                 }
                 else
                 {
-                    context.Model.ReceivedConfirmations = leastConfirmed.ConfirmationCount;
+                    var requiredConfs = FiroListener.ConfirmationsRequired(
+                        leastSettled, context.InvoiceEntity.SpeedPolicy);
+                    context.Model.ReceivedConfirmations = leastSettled.ConfirmationCount;
+                    context.Model.RequiredConfirmations = (int)requiredConfs;
                 }
-                context.Model.RequiredConfirmations = (int)requiredConfs;
             }
 
             context.Model.InvoiceBitcoinUrl =
