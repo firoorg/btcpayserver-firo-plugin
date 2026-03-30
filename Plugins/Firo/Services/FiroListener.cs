@@ -130,7 +130,7 @@ namespace BTCPayServer.Plugins.Firo.Services
             var paymentId = PaymentTypes.CHAIN.GetPaymentMethodId(network.CryptoCode);
             var handler = (FiroLikePaymentMethodHandler)_handlers[paymentId];
 
-            // Get all the required data in one list
+            // Build invoice lookup data
             var expandedInvoices = invoices.Select(entity => (
                     Invoice: entity,
                     ExistingPayments: GetAllFiroPayments(entity, cryptoCode),
@@ -147,19 +147,19 @@ namespace BTCPayServer.Plugins.Firo.Services
                             tuple.Invoice))
                 )).ToList();
 
-            var existingPaymentData = expandedInvoices
-                .SelectMany(tuple => tuple.ExistingPayments).ToList();
-
-            // Collect all diversifiers we need to track
-            var trackedDiversifiers = new HashSet<int>();
-            foreach (var expandedInvoice in expandedInvoices)
+            // Build a set of tracked destination addresses for quick lookup
+            var addressToInvoice = new Dictionary<string, (InvoiceEntity Invoice,
+                FiroLikeOnChainPaymentMethodDetails Details)>();
+            foreach (var ei in expandedInvoices)
             {
-                trackedDiversifiers.Add(expandedInvoice.PaymentMethodDetails.Diversifier);
-                foreach (var ep in expandedInvoice.ExistingPayments)
+                if (ei.Prompt?.Destination != null)
                 {
-                    trackedDiversifiers.Add(ep.PaymentData.Diversifier);
+                    addressToInvoice[ei.Prompt.Destination] = (ei.Invoice, ei.PaymentMethodDetails);
                 }
             }
+
+            var existingPaymentData = expandedInvoices
+                .SelectMany(tuple => tuple.ExistingPayments).ToList();
 
             // Get all spark mints from the wallet
             SparkMintInfo[] mints;
@@ -174,48 +174,51 @@ namespace BTCPayServer.Plugins.Firo.Services
                 return;
             }
 
-            if (mints == null)
+            if (mints == null || mints.Length == 0)
             {
                 return;
             }
 
-            // Filter mints that match our tracked diversifiers
-            var relevantMints = mints.Where(m => trackedDiversifiers.Contains(m.Diversifier)).ToList();
+            // For each unique txid in mints, resolve Spark addresses via getsparkcoinaddr
+            var txIds = mints.Select(m => m.TxId).Distinct().ToList();
+            var txToAddressOutputs = new Dictionary<string, SparkCoinAddrInfo[]>();
 
-            var paymentsToUpdate = new List<(PaymentEntity Payment, InvoiceEntity invoice)>();
-            var processingTasks = new List<Task>();
-
-            foreach (var mint in relevantMints)
+            foreach (var txId in txIds)
             {
-                // Find which invoice this mint belongs to
-                var matchingInvoice = expandedInvoices.FirstOrDefault(ei =>
-                    ei.PaymentMethodDetails.Diversifier == mint.Diversifier);
-
-                if (matchingInvoice.Invoice == null)
+                try
                 {
-                    // Check existing payments
-                    var existingMatch = existingPaymentData.FirstOrDefault(ep =>
-                        ep.PaymentData.Diversifier == mint.Diversifier &&
-                        ep.PaymentData.TransactionId == mint.TxId);
-                    if (existingMatch.Invoice != null)
+                    var coinAddrs = await rpcClient.SendCommandAsync<SparkCoinAddrInfo[]>(
+                        "getsparkcoinaddr", new object[] { txId });
+                    if (coinAddrs != null)
                     {
-                        matchingInvoice = expandedInvoices.First(ei =>
-                            ei.Invoice.Id == existingMatch.Invoice.Id);
+                        txToAddressOutputs[txId] = coinAddrs;
                     }
                 }
-
-                if (matchingInvoice.Invoice == null)
+                catch (Exception ex)
                 {
-                    continue;
+                    _logger.LogWarning(ex,
+                        $"Failed to resolve Spark addresses for tx {txId}");
                 }
+            }
 
-                // Get confirmation count for this transaction
+            var paymentsToUpdate = new List<(PaymentEntity Payment, InvoiceEntity invoice)>();
+
+            // Match resolved addresses to tracked invoices
+            foreach (var kvp in txToAddressOutputs)
+            {
+                var txId = kvp.Key;
+                var outputs = kvp.Value;
+
+                // Find the mint info for this txid (for block height)
+                var mintInfo = mints.FirstOrDefault(m => m.TxId == txId);
+
+                // Get confirmation count
                 long confirmations = 0;
-                long blockHeight = mint.Height;
+                long blockHeight = mintInfo?.Height ?? 0;
                 try
                 {
                     var txInfo = await rpcClient.SendCommandAsync<GetTransactionResponse>(
-                        "gettransaction", new object[] { mint.TxId });
+                        "gettransaction", new object[] { txId });
                     confirmations = txInfo.Confirmations;
                     if (txInfo.BlockHeight > 0)
                     {
@@ -225,21 +228,44 @@ namespace BTCPayServer.Plugins.Firo.Services
                 catch (Exception ex)
                 {
                     _logger.LogWarning(ex,
-                        $"Failed to get transaction info for {mint.TxId}, using mint data");
+                        $"Failed to get transaction info for {txId}, using mint data");
                 }
 
-                processingTasks.Add(HandlePaymentData(
-                    cryptoCode,
-                    mint.Amount,
-                    mint.Diversifier,
-                    mint.TxId,
-                    confirmations,
-                    blockHeight,
-                    matchingInvoice.Invoice,
-                    paymentsToUpdate));
-            }
+                // Group outputs by destination address and match to invoices
+                foreach (var output in outputs)
+                {
+                    if (output.Address == null)
+                    {
+                        continue;
+                    }
 
-            await Task.WhenAll(processingTasks);
+                    // Check if this address matches a tracked invoice
+                    if (!addressToInvoice.TryGetValue(output.Address, out var invoiceData))
+                    {
+                        // Also check via InvoiceRepository for existing payments
+                        var invoice = await _invoiceRepository.GetInvoiceFromAddress(
+                            paymentId, output.Address);
+                        if (invoice == null)
+                        {
+                            continue;
+                        }
+                        var details = handler.ParsePaymentPromptDetails(
+                            invoice.GetPaymentPrompt(paymentId).Details);
+                        invoiceData = (invoice, details);
+                    }
+
+                    await HandlePaymentData(
+                        cryptoCode,
+                        output.Amount,
+                        output.Address,
+                        txId,
+                        confirmations,
+                        blockHeight,
+                        invoiceData.Invoice,
+                        invoiceData.Details,
+                        paymentsToUpdate);
+                }
+            }
 
             if (paymentsToUpdate.Any())
             {
@@ -263,25 +289,21 @@ namespace BTCPayServer.Plugins.Firo.Services
 
         private async Task OnTransactionUpdated(string cryptoCode, string transactionHash)
         {
-            // When we get a tx notification, we update all pending invoices
-            // because we can't easily map a single txid to a specific Spark address
-            // without querying listsparkmints anyway
             await UpdateAnyPendingFiroPayment(cryptoCode);
         }
 
-        private async Task HandlePaymentData(string cryptoCode, decimal amount, int diversifier,
-            string txId, long confirmations, long blockHeight, InvoiceEntity invoice,
+        private async Task HandlePaymentData(string cryptoCode, decimal amount,
+            string sparkAddress, string txId, long confirmations, long blockHeight,
+            InvoiceEntity invoice, FiroLikeOnChainPaymentMethodDetails promptDetails,
             List<(PaymentEntity Payment, InvoiceEntity invoice)> paymentsToUpdate)
         {
             var network = _networkProvider.GetNetwork(cryptoCode);
             var pmi = PaymentTypes.CHAIN.GetPaymentMethodId(network.CryptoCode);
             var handler = (FiroLikePaymentMethodHandler)_handlers[pmi];
-            var promptDetails = handler.ParsePaymentPromptDetails(
-                invoice.GetPaymentPrompt(pmi).Details);
 
             var details = new FiroLikePaymentData()
             {
-                Diversifier = diversifier,
+                SparkAddress = sparkAddress,
                 TransactionId = txId,
                 ConfirmationCount = confirmations,
                 BlockHeight = blockHeight,
@@ -298,7 +320,7 @@ namespace BTCPayServer.Plugins.Firo.Services
                 Status = status,
                 Amount = amount,
                 Created = DateTimeOffset.UtcNow,
-                Id = $"{txId}#{diversifier}",
+                Id = $"{txId}#{sparkAddress}",
                 Currency = network.CryptoCode,
                 InvoiceDataId = invoice.Id,
             }.Set(invoice, handler, details);

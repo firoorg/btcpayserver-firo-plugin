@@ -1,5 +1,4 @@
 using System;
-using System.Collections.Generic;
 using System.Threading.Tasks;
 
 using BTCPayServer.Data;
@@ -49,31 +48,15 @@ namespace BTCPayServer.Plugins.Firo.Payments
                             "estimatesmartfee", new object[] { 2 }),
                         ReserveAddress = async s =>
                         {
-                            var address = await rpcClient.SendCommandAsync<string>(
+                            // getnewsparkaddress returns an array with one element
+                            var result = await rpcClient.SendCommandAsync<string[]>(
                                 "getnewsparkaddress");
-
-                            // Get all addresses to find the diversifier for this address
-                            var allAddresses = await rpcClient.SendCommandAsync<Dictionary<string, string>>(
-                                "getallsparkaddresses");
-
-                            int diversifier = -1;
-                            if (allAddresses != null)
+                            if (result == null || result.Length == 0)
                             {
-                                foreach (var kvp in allAddresses)
-                                {
-                                    if (kvp.Value == address && int.TryParse(kvp.Key, out var div))
-                                    {
-                                        diversifier = div;
-                                        break;
-                                    }
-                                }
+                                throw new InvalidOperationException(
+                                    "getnewsparkaddress returned empty result");
                             }
-
-                            return new SparkAddressReservation
-                            {
-                                Address = address,
-                                Diversifier = diversifier
-                            };
+                            return result[0];
                         },
                         InvoiceSettledConfirmationThreshold =
                             supportedPaymentMethod.InvoiceSettledConfirmationThreshold
@@ -93,30 +76,29 @@ namespace BTCPayServer.Plugins.Firo.Payments
             if (!_firoRpcProvider.IsConfigured(_network.CryptoCode))
             {
                 throw new PaymentMethodUnavailableException(
-                    $"BTCPAY_FIRO_DAEMON_URI isn't configured");
+                    "BTCPAY_FIRO_DAEMON_URI isn't configured");
             }
 
             if (!_firoRpcProvider.IsAvailable(_network.CryptoCode) ||
                 context.State is not Prepare firoPrepare)
             {
-                throw new PaymentMethodUnavailableException($"Node or wallet not available");
+                throw new PaymentMethodUnavailableException("Node or wallet not available");
             }
 
             var invoice = context.InvoiceEntity;
             var feeEstimate = await firoPrepare.GetFeeRate;
-            var reservation = await firoPrepare.ReserveAddress(invoice.Id);
+            var address = await firoPrepare.ReserveAddress(invoice.Id);
 
             var feeRatePerKb = feeEstimate?.FeeRate ?? 0.00001m;
 
             var details = new FiroLikeOnChainPaymentMethodDetails()
             {
-                Diversifier = reservation.Diversifier,
                 InvoiceSettledConfirmationThreshold = firoPrepare.InvoiceSettledConfirmationThreshold
             };
-            context.Prompt.Destination = reservation.Address;
+            context.Prompt.Destination = address;
             context.Prompt.PaymentMethodFee = feeRatePerKb;
             context.Prompt.Details = JObject.FromObject(details, Serializer);
-            context.TrackedDestinations.Add(reservation.Address);
+            context.TrackedDestinations.Add(address);
         }
 
         private FiroPaymentPromptDetails ParsePaymentMethodConfig(JToken config)
@@ -154,14 +136,8 @@ namespace BTCPayServer.Plugins.Firo.Payments
         class Prepare
         {
             public Task<EstimateSmartFeeResponse> GetFeeRate;
-            public Func<string, Task<SparkAddressReservation>> ReserveAddress;
+            public Func<string, Task<string>> ReserveAddress;
             public long? InvoiceSettledConfirmationThreshold { get; set; }
-        }
-
-        public class SparkAddressReservation
-        {
-            public string Address { get; set; }
-            public int Diversifier { get; set; }
         }
     }
 }
