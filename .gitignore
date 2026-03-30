@@ -1,0 +1,10 @@
+**/bin/**/*
+**/obj
+.idea
+Plugins/packed
+.vs/
+coverage
+nuget-packages
+**/.AssemblyAttributes
+btcpay-firo-plugin.sln.DotSettings.user
+.DS_Store
