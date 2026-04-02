@@ -3,7 +3,6 @@ using System.Threading.Tasks;
 
 using BTCPayServer.Data;
 using BTCPayServer.Payments;
-using BTCPayServer.Plugins.Firo.RPC.Models;
 using BTCPayServer.Plugins.Firo.Services;
 
 using Newtonsoft.Json;
@@ -44,11 +43,12 @@ namespace BTCPayServer.Plugins.Firo.Payments
                 {
                     context.State = new Prepare()
                     {
-                        GetFeeRate = rpcClient.SendCommandAsync<EstimateSmartFeeResponse>(
-                            "estimatesmartfee", new object[] { 2 }),
+                        // estimatefee <nblocks> returns a decimal fee rate per kB, or -1
+                        GetFeeRate = rpcClient.SendCommandAsync<decimal>(
+                            "estimatefee", new object[] { 2 }),
                         ReserveAddress = async s =>
                         {
-                            // getnewsparkaddress returns an array with one element
+                            // getnewsparkaddress returns a VARR with one string element
                             var result = await rpcClient.SendCommandAsync<string[]>(
                                 "getnewsparkaddress");
                             if (result == null || result.Length == 0)
@@ -86,10 +86,14 @@ namespace BTCPayServer.Plugins.Firo.Payments
             }
 
             var invoice = context.InvoiceEntity;
-            var feeEstimate = await firoPrepare.GetFeeRate;
+            var feeRatePerKb = await firoPrepare.GetFeeRate;
             var address = await firoPrepare.ReserveAddress(invoice.Id);
 
-            var feeRatePerKb = feeEstimate?.FeeRate ?? 0.00001m;
+            // estimatefee returns -1 if estimation is not possible
+            if (feeRatePerKb <= 0)
+            {
+                feeRatePerKb = 0.00001m;
+            }
 
             var details = new FiroLikeOnChainPaymentMethodDetails()
             {
@@ -135,7 +139,7 @@ namespace BTCPayServer.Plugins.Firo.Payments
 
         class Prepare
         {
-            public Task<EstimateSmartFeeResponse> GetFeeRate;
+            public Task<decimal> GetFeeRate;
             public Func<string, Task<string>> ReserveAddress;
             public long? InvoiceSettledConfirmationThreshold { get; set; }
         }

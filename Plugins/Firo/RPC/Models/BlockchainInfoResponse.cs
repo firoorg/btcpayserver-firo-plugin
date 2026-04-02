@@ -8,7 +8,6 @@ namespace BTCPayServer.Plugins.Firo.RPC.Models
         [JsonProperty("blocks")] public long Blocks { get; set; }
         [JsonProperty("headers")] public long Headers { get; set; }
         [JsonProperty("verificationprogress")] public decimal VerificationProgress { get; set; }
-        [JsonProperty("initialblockdownload")] public bool InitialBlockDownload { get; set; }
     }
 
     public class NetworkInfoResponse

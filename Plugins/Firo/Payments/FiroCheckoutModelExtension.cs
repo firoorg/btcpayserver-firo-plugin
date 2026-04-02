@@ -64,10 +64,8 @@ namespace BTCPayServer.Plugins.Firo.Payments
                 }
                 else
                 {
-                    var requiredConfs = FiroListener.ConfirmationsRequired(
-                        leastSettled, context.InvoiceEntity.SpeedPolicy);
                     context.Model.ReceivedConfirmations = leastSettled.ConfirmationCount;
-                    context.Model.RequiredConfirmations = (int)requiredConfs;
+                    context.Model.RequiredConfirmations = (int)requiredConfsForDisplay;
                 }
             }
 

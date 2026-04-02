@@ -63,7 +63,9 @@ namespace BTCPayServer.Plugins.Firo.Services
                     "getblockchaininfo");
                 summary.CurrentHeight = blockchainInfo.Blocks;
                 summary.TargetHeight = blockchainInfo.Headers;
-                summary.Synced = !blockchainInfo.InitialBlockDownload &&
+                // Firo doesn't expose initialblockdownload; use verificationprogress
+                // and blocks-vs-headers to determine sync state
+                summary.Synced = blockchainInfo.VerificationProgress > 0.999m &&
                                  blockchainInfo.Blocks >= blockchainInfo.Headers - 1;
                 summary.DaemonAvailable = true;
                 summary.UpdatedAt = DateTime.UtcNow;
