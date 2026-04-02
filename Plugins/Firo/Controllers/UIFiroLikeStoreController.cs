@@ -13,6 +13,7 @@ using BTCPayServer.Payments;
 using BTCPayServer.Plugins.Firo.Configuration;
 using BTCPayServer.Plugins.Firo.Payments;
 using BTCPayServer.Plugins.Firo.Services;
+using BTCPayServer.Services.Invoices;
 using BTCPayServer.Services.Stores;
 
 using Microsoft.AspNetCore.Authorization;
