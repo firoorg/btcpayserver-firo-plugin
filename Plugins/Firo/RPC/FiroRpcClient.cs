@@ -2,6 +2,8 @@ using System;
 using System.Net.Http;
 using System.Net.Http.Headers;
 using System.Text;
+using System.Text.Json;
+using System.Text.Json.Serialization;
 using System.Threading;
 using System.Threading.Tasks;
 
@@ -12,6 +14,11 @@ namespace BTCPayServer.Plugins.Firo.RPC
 {
     public class FiroRpcClient
     {
+        private static readonly JsonSerializerOptions RpcResultJsonOptions = new JsonSerializerOptions
+        {
+            NumberHandling = JsonNumberHandling.AllowReadingFromString
+        };
+
         private readonly Uri _address;
         private readonly string _username;
         private readonly string _password;
@@ -45,7 +52,7 @@ namespace BTCPayServer.Plugins.Firo.RPC
             {
                 Method = HttpMethod.Post,
                 RequestUri = _address,
-                Content = new StringContent(request.ToString(Formatting.None), Encoding.UTF8, "application/json")
+                Content = new StringContent(request.ToString(Formatting.None), Encoding.UTF8, "text/plain")
             };
             httpRequest.Headers.Accept.Clear();
             httpRequest.Headers.Accept.Add(new MediaTypeWithQualityHeaderValue("application/json"));
@@ -60,21 +67,26 @@ namespace BTCPayServer.Plugins.Firo.RPC
             rawResult.EnsureSuccessStatusCode();
             var rawJson = await rawResult.Content.ReadAsStringAsync();
 
-            var response = JsonConvert.DeserializeObject<JsonRpcResult>(rawJson);
-            if (response.Error != null)
+            var root = JObject.Parse(rawJson);
+            var errorToken = root["error"];
+            if (errorToken != null && errorToken.Type != JTokenType.Null)
             {
-                throw new FiroRpcException
-                {
-                    Error = response.Error
-                };
+                throw new FiroRpcException { Error = DeserializeFromToken<JsonRpcResultError>(errorToken) };
             }
 
-            if (response.Result == null || response.Result.Type == JTokenType.Null)
+            var resultToken = root["result"];
+            if (resultToken == null || resultToken.Type == JTokenType.Null)
             {
                 return default;
             }
 
-            return response.Result.ToObject<TResponse>();
+            return DeserializeFromToken<TResponse>(resultToken);
+        }
+
+        private static T DeserializeFromToken<T>(JToken token)
+        {
+            var json = token.ToString(Formatting.None);
+            return System.Text.Json.JsonSerializer.Deserialize<T>(json, RpcResultJsonOptions) ?? default!;
         }
 
         public class FiroRpcException : Exception
@@ -85,15 +97,13 @@ namespace BTCPayServer.Plugins.Firo.RPC
 
         public class JsonRpcResultError
         {
-            [JsonProperty("code")] public int Code { get; set; }
-            [JsonProperty("message")] public string Message { get; set; }
-        }
+            [JsonProperty("code")]
+            [JsonPropertyName("code")]
+            public int Code { get; set; }
 
-        internal class JsonRpcResult
-        {
-            [JsonProperty("result")] public JToken Result { get; set; }
-            [JsonProperty("error")] public JsonRpcResultError Error { get; set; }
-            [JsonProperty("id")] public string Id { get; set; }
+            [JsonProperty("message")]
+            [JsonPropertyName("message")]
+            public string Message { get; set; }
         }
     }
 }

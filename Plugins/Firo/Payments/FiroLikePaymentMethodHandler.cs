@@ -1,9 +1,11 @@
 using System;
+using System.Collections.Generic;
 using System.Threading.Tasks;
 
 using BTCPayServer.Data;
 using BTCPayServer.Payments;
 using BTCPayServer.Plugins.Firo.Services;
+using BTCPayServer.Services;
 
 using Newtonsoft.Json;
 using Newtonsoft.Json.Linq;
@@ -16,16 +18,19 @@ namespace BTCPayServer.Plugins.Firo.Payments
         public FiroLikeSpecificBtcPayNetwork Network => _network;
         public JsonSerializer Serializer { get; }
         private readonly FiroRpcProvider _firoRpcProvider;
+        private readonly WalletRepository _walletRepository;
 
         public PaymentMethodId PaymentMethodId { get; }
 
         public FiroLikePaymentMethodHandler(FiroLikeSpecificBtcPayNetwork network,
-            FiroRpcProvider firoRpcProvider)
+            FiroRpcProvider firoRpcProvider,
+            WalletRepository walletRepository)
         {
             PaymentMethodId = PaymentTypes.CHAIN.GetPaymentMethodId(network.CryptoCode);
             _network = network;
             Serializer = BlobSerializer.CreateSerializer().Serializer;
             _firoRpcProvider = firoRpcProvider;
+            _walletRepository = walletRepository;
         }
 
         bool IsReady() => _firoRpcProvider.IsConfigured(_network.CryptoCode) &&
@@ -69,6 +74,33 @@ namespace BTCPayServer.Plugins.Firo.Payments
                 }
             }
             return Task.CompletedTask;
+        }
+
+        public async Task AfterSavingInvoice(PaymentMethodContext paymentMethodContext)
+        {
+            var paymentPrompt = paymentMethodContext.Prompt;
+            var store = paymentMethodContext.Store;
+            var entity = paymentMethodContext.InvoiceEntity;
+            var links = new List<WalletObjectLinkData>();
+            var walletId = new WalletId(store.Id, _network.CryptoCode);
+            await _walletRepository.EnsureWalletObject(new WalletObjectId(
+                walletId,
+                WalletObjectData.Types.Invoice,
+                entity.Id));
+            if (paymentPrompt.Destination is string destination)
+            {
+                links.Add(WalletRepository.NewWalletObjectLinkData(
+                    new WalletObjectId(
+                        walletId,
+                        WalletObjectData.Types.Address,
+                        destination),
+                    new WalletObjectId(
+                        walletId,
+                        WalletObjectData.Types.Invoice,
+                        entity.Id)));
+            }
+
+            await _walletRepository.EnsureCreated(null, links);
         }
 
         public async Task ConfigurePrompt(PaymentMethodContext context)

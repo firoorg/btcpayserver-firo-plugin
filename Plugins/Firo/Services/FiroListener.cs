@@ -176,8 +176,7 @@ namespace BTCPayServer.Plugins.Firo.Services
             SparkMintInfo[] mints;
             try
             {
-                mints = await rpcClient.SendCommandAsync<SparkMintInfo[]>(
-                    "listsparkmints", new object[] { true });
+                mints = await rpcClient.SendCommandAsync<SparkMintInfo[]>("listsparkmints");
             }
             catch (Exception ex)
             {
